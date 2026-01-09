@@ -1,0 +1,109 @@
+service: adyen-slack-assistant
+
+frameworkVersion: '3'
+
+provider:
+  name: aws
+  runtime: provided.al2
+  architecture: arm64
+  region: ${opt:region, 'eu-west-1'}
+  stage: ${opt:stage, 'dev'}
+  memorySize: 256
+  timeout: 30
+
+  environment:
+    SLACK_BOT_TOKEN: ${env:SLACK_BOT_TOKEN}
+    SLACK_SIGNING_SECRET: ${env:SLACK_SIGNING_SECRET}
+    ADYEN_API_KEY: ${env:ADYEN_API_KEY}
+    ADYEN_ENVIRONMENT: ${env:ADYEN_ENVIRONMENT, 'TEST'}
+    ADYEN_LIVE_PREFIX: ${env:ADYEN_LIVE_PREFIX, ''}
+    OPENAI_API_KEY: ${env:OPENAI_API_KEY}
+    OPENAI_MODEL: ${env:OPENAI_MODEL, 'gpt-4o'}
+    DYNAMODB_TABLE: ${self:service}-approvals-${self:provider.stage}
+    SQS_QUEUE_URL: !Ref ProcessingQueue
+    AWS_REGION: ${self:provider.region}
+    PERMISSIONS_JSON: ${env:PERMISSIONS_JSON, ''}
+
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - sqs:SendMessage
+            - sqs:ReceiveMessage
+            - sqs:DeleteMessage
+            - sqs:GetQueueAttributes
+          Resource: !GetAtt ProcessingQueue.Arn
+        - Effect: Allow
+          Action:
+            - dynamodb:PutItem
+            - dynamodb:GetItem
+            - dynamodb:DeleteItem
+          Resource: !GetAtt ApprovalsTable.Arn
+
+package:
+  individually: true
+
+functions:
+  webhook:
+    handler: bootstrap
+    package:
+      artifact: bin/webhook.zip
+    events:
+      - http:
+          path: /slack/events
+          method: post
+          cors: true
+
+  processor:
+    handler: bootstrap
+    package:
+      artifact: bin/processor.zip
+    timeout: 120
+    memorySize: 512
+    events:
+      - sqs:
+          arn: !GetAtt ProcessingQueue.Arn
+          batchSize: 1
+
+resources:
+  Resources:
+    ProcessingQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:service}-queue-${self:provider.stage}
+        VisibilityTimeout: 150
+        MessageRetentionPeriod: 86400
+        RedrivePolicy:
+          deadLetterTargetArn: !GetAtt DeadLetterQueue.Arn
+          maxReceiveCount: 3
+
+    DeadLetterQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:service}-dlq-${self:provider.stage}
+        MessageRetentionPeriod: 1209600
+
+    ApprovalsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:service}-approvals-${self:provider.stage}
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: pk
+            AttributeType: S
+        KeySchema:
+          - AttributeName: pk
+            KeyType: HASH
+        TimeToLiveSpecification:
+          AttributeName: expiresAt
+          Enabled: true
+
+  Outputs:
+    WebhookUrl:
+      Description: Slack webhook URL
+      Value: !Sub "https://${ApiGatewayRestApi}.execute-api.${AWS::Region}.amazonaws.com/${self:provider.stage}/slack/events"
+
+    QueueUrl:
+      Description: SQS Queue URL
+      Value: !Ref ProcessingQueue
