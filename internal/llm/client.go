@@ -11,7 +11,9 @@ import (
 	"github.com/getalternative/adyen-slack-assistant/internal/config"
 )
 
-// Client handles LLM interactions
+const anthropicAPIURL = "https://api.anthropic.com/v1/messages"
+
+// Client handles LLM interactions via Anthropic API
 type Client struct {
 	cfg        *config.Config
 	httpClient *http.Client
@@ -27,48 +29,52 @@ func New(cfg *config.Config) *Client {
 
 // Tool represents an available tool/function
 type Tool struct {
-	Type     string       `json:"type"`
-	Function ToolFunction `json:"function"`
-}
-
-// ToolFunction describes a function
-type ToolFunction struct {
 	Name        string                 `json:"name"`
 	Description string                 `json:"description"`
-	Parameters  map[string]interface{} `json:"parameters"`
+	InputSchema map[string]interface{} `json:"input_schema"`
 }
 
 // ToolCall represents a tool call from the LLM
 type ToolCall struct {
-	ID       string `json:"id"`
-	Type     string `json:"type"`
-	Function struct {
-		Name      string `json:"name"`
-		Arguments string `json:"arguments"`
-	} `json:"function"`
+	ID    string                 `json:"id"`
+	Name  string                 `json:"name"`
+	Input map[string]interface{} `json:"input"`
 }
 
 // Message represents a chat message
 type Message struct {
-	Role       string     `json:"role"`
-	Content    string     `json:"content,omitempty"`
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string     `json:"tool_call_id,omitempty"`
+	Role    string         `json:"role"`
+	Content []ContentBlock `json:"content"`
 }
 
-// ChatRequest represents an OpenAI chat completion request
-type ChatRequest struct {
-	Model    string    `json:"model"`
-	Messages []Message `json:"messages"`
-	Tools    []Tool    `json:"tools,omitempty"`
+// ContentBlock represents a content block in a message
+type ContentBlock struct {
+	Type      string                 `json:"type"`
+	Text      string                 `json:"text,omitempty"`
+	ID        string                 `json:"id,omitempty"`
+	Name      string                 `json:"name,omitempty"`
+	Input     map[string]interface{} `json:"input,omitempty"`
+	ToolUseID string                 `json:"tool_use_id,omitempty"`
+	Content   string                 `json:"content,omitempty"`
 }
 
-// ChatResponse represents an OpenAI chat completion response
-type ChatResponse struct {
-	Choices []struct {
-		Message      Message `json:"message"`
-		FinishReason string  `json:"finish_reason"`
-	} `json:"choices"`
+// AnthropicRequest represents a request to Anthropic API
+type AnthropicRequest struct {
+	Model     string    `json:"model"`
+	MaxTokens int       `json:"max_tokens"`
+	System    string    `json:"system,omitempty"`
+	Messages  []Message `json:"messages"`
+	Tools     []Tool    `json:"tools,omitempty"`
+}
+
+// AnthropicResponse represents a response from Anthropic API
+type AnthropicResponse struct {
+	ID           string         `json:"id"`
+	Type         string         `json:"type"`
+	Role         string         `json:"role"`
+	Content      []ContentBlock `json:"content"`
+	StopReason   string         `json:"stop_reason"`
+	StopSequence string         `json:"stop_sequence,omitempty"`
 }
 
 // Response from ProcessMessage
@@ -79,15 +85,15 @@ type Response struct {
 
 // ProcessMessage sends a message to the LLM and returns the response
 func (c *Client) ProcessMessage(ctx context.Context, userMessage string, tools []Tool, conversationHistory []Message) (*Response, error) {
+	// Build messages
 	messages := append(conversationHistory, Message{
-		Role:    "user",
-		Content: userMessage,
+		Role: "user",
+		Content: []ContentBlock{
+			{Type: "text", Text: userMessage},
+		},
 	})
 
-	// Add system prompt
-	systemPrompt := Message{
-		Role: "system",
-		Content: `You are a helpful assistant that helps with Adyen payment operations.
+	systemPrompt := `You are a helpful assistant that helps with Adyen payment operations.
 You have access to Adyen tools for:
 - Checking payment status
 - Creating payment links
@@ -98,14 +104,14 @@ You have access to Adyen tools for:
 
 When users ask about payments, use the appropriate tool.
 Be concise and helpful. Always confirm actions before executing them.
-For destructive actions (refunds, cancellations), clearly state what will happen.`,
-	}
-	messages = append([]Message{systemPrompt}, messages...)
+For destructive actions (refunds, cancellations), clearly state what will happen.`
 
-	reqBody := ChatRequest{
-		Model:    c.cfg.LLM.Model,
-		Messages: messages,
-		Tools:    tools,
+	reqBody := AnthropicRequest{
+		Model:     c.cfg.LLM.Model,
+		MaxTokens: 1024,
+		System:    systemPrompt,
+		Messages:  messages,
+		Tools:     tools,
 	}
 
 	body, err := json.Marshal(reqBody)
@@ -113,13 +119,14 @@ For destructive actions (refunds, cancellations), clearly state what will happen
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.openai.com/v1/chat/completions", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", anthropicAPIURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.cfg.LLM.APIKey)
+	req.Header.Set("x-api-key", c.cfg.LLM.APIKey)
+	req.Header.Set("anthropic-version", "2023-06-01")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -129,21 +136,34 @@ For destructive actions (refunds, cancellations), clearly state what will happen
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("LLM API error (status %d): %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(body))
 	}
 
-	var chatResp ChatResponse
-	if err := json.NewDecoder(resp.Body).Decode(&chatResp); err != nil {
+	var anthropicResp AnthropicResponse
+	if err := json.NewDecoder(resp.Body).Decode(&anthropicResp); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	if len(chatResp.Choices) == 0 {
-		return nil, fmt.Errorf("no response from LLM")
+	// Parse response
+	response := &Response{}
+	for _, block := range anthropicResp.Content {
+		switch block.Type {
+		case "text":
+			response.Text += block.Text
+		case "tool_use":
+			response.ToolCalls = append(response.ToolCalls, ToolCall{
+				ID:    block.ID,
+				Name:  block.Name,
+				Input: block.Input,
+			})
+		}
 	}
 
-	choice := chatResp.Choices[0]
-	return &Response{
-		Text:      choice.Message.Content,
-		ToolCalls: choice.Message.ToolCalls,
-	}, nil
+	return response, nil
+}
+
+// ConvertToolsFromMCP converts MCP tools to Anthropic format
+func ConvertToolsFromMCP(mcpTools []Tool) []Tool {
+	// Anthropic uses the same format, just ensure input_schema is set
+	return mcpTools
 }

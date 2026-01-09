@@ -26,9 +26,8 @@ type AdyenConfig struct {
 }
 
 type LLMConfig struct {
-	Provider string `json:"provider"` // openai
-	APIKey   string `json:"apiKey"`
-	Model    string `json:"model"`
+	APIKey string `json:"apiKey"`
+	Model  string `json:"model"`
 }
 
 type PermissionsConfig struct {
@@ -77,9 +76,8 @@ func Load() *Config {
 				LivePrefix:  getEnv("ADYEN_LIVE_PREFIX", ""),
 			},
 			LLM: LLMConfig{
-				Provider: getEnv("LLM_PROVIDER", "openai"),
-				APIKey:   getEnv("OPENAI_API_KEY", ""),
-				Model:    getEnv("OPENAI_MODEL", "gpt-4o"),
+				APIKey: getEnv("ANTHROPIC_API_KEY", ""),
+				Model:  getEnv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514"),
 			},
 			Permissions: loadPermissions(),
 			AWS: AWSConfig{

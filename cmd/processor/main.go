@@ -144,25 +144,22 @@ func handleMessage(ctx context.Context, queueMsg QueueMessage) error {
 
 	// Process tool calls
 	for _, toolCall := range response.ToolCalls {
-		var args map[string]interface{}
-		if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
-			continue
-		}
+		args := toolCall.Input
 
 		// Extract amount if present (for permission checks)
 		amount := extractAmount(args)
 
 		// Check permissions
-		permResult := permChecker.Check(event.User, event.Channel, toolCall.Function.Name, amount)
+		permResult := permChecker.Check(event.User, event.Channel, toolCall.Name, amount)
 
 		if !permResult.Allowed {
-			auditLogger.LogDenied(event.User, toolCall.Function.Name, event.Channel, permResult.Reason)
+			auditLogger.LogDenied(event.User, toolCall.Name, event.Channel, permResult.Reason)
 			return slack.Reply(msg, fmt.Sprintf("Permission denied: %s", permResult.Reason))
 		}
 
 		if permResult.NeedsApproval {
 			// Request approval
-			err := approvalMgr.RequestApproval(ctx, msg, toolCall.Function.Name, args, amount, permResult.Approvers)
+			err := approvalMgr.RequestApproval(ctx, msg, toolCall.Name, args, amount, permResult.Approvers)
 			if err != nil {
 				return slack.Reply(msg, fmt.Sprintf("Failed to request approval: %s", err.Error()))
 			}
@@ -170,17 +167,17 @@ func handleMessage(ctx context.Context, queueMsg QueueMessage) error {
 		}
 
 		// Execute the tool
-		result, err := adyenClient.CallTool(ctx, toolCall.Function.Name, args)
+		result, err := adyenClient.CallTool(ctx, toolCall.Name, args)
 		if err != nil {
-			auditLogger.LogError(event.User, toolCall.Function.Name, event.Channel, err.Error())
+			auditLogger.LogError(event.User, toolCall.Name, event.Channel, err.Error())
 			return slack.Reply(msg, fmt.Sprintf("Tool execution failed: %s", err.Error()))
 		}
 
 		// Log success and reply
-		auditLogger.LogAllowed(event.User, toolCall.Function.Name, event.Channel, "Executed successfully")
+		auditLogger.LogAllowed(event.User, toolCall.Name, event.Channel, "Executed successfully")
 
 		// Format the result nicely
-		replyText := formatToolResult(toolCall.Function.Name, result)
+		replyText := formatToolResult(toolCall.Name, result)
 		return slack.Reply(msg, replyText)
 	}
 

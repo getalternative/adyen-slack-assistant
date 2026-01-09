@@ -17,8 +17,8 @@ provider:
     ADYEN_API_KEY: ${env:ADYEN_API_KEY}
     ADYEN_ENVIRONMENT: ${env:ADYEN_ENVIRONMENT, 'TEST'}
     ADYEN_LIVE_PREFIX: ${env:ADYEN_LIVE_PREFIX, ''}
-    OPENAI_API_KEY: ${env:OPENAI_API_KEY}
-    OPENAI_MODEL: ${env:OPENAI_MODEL, 'gpt-4o'}
+    ANTHROPIC_API_KEY: ${env:ANTHROPIC_API_KEY}
+    ANTHROPIC_MODEL: ${env:ANTHROPIC_MODEL, 'claude-sonnet-4-20250514'}
     DYNAMODB_TABLE: ${self:service}-approvals-${self:provider.stage}
     SQS_QUEUE_URL: !Ref ProcessingQueue
     AWS_REGION: ${self:provider.region}

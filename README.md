@@ -54,8 +54,8 @@ Add these secrets in your Doppler project (`adyen-slack-assistant`):
 | `ADYEN_API_KEY` | Adyen API key |
 | `ADYEN_ENVIRONMENT` | `TEST` or `LIVE` |
 | `ADYEN_LIVE_PREFIX` | Live URL prefix (only for LIVE) |
-| `OPENAI_API_KEY` | OpenAI API key |
-| `OPENAI_MODEL` | Model name (default: gpt-4o) |
+| `ANTHROPIC_API_KEY` | Anthropic API key |
+| `ANTHROPIC_MODEL` | Model name (default: claude-sonnet-4-20250514) |
 | `PERMISSIONS_JSON` | JSON permissions config (see below) |
 
 ### 3. Create Slack App

@@ -224,16 +224,13 @@ func (c *Client) loadTools() error {
 		return fmt.Errorf("failed to parse tools: %w", err)
 	}
 
-	// Convert to LLM tool format
+	// Convert to LLM tool format (Anthropic)
 	c.tools = make([]llm.Tool, len(result.Tools))
 	for i, tool := range result.Tools {
 		c.tools[i] = llm.Tool{
-			Type: "function",
-			Function: llm.ToolFunction{
-				Name:        tool.Name,
-				Description: tool.Description,
-				Parameters:  tool.InputSchema,
-			},
+			Name:        tool.Name,
+			Description: tool.Description,
+			InputSchema: tool.InputSchema,
 		}
 	}
 
