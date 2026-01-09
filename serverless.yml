@@ -6,7 +6,7 @@ provider:
   name: aws
   runtime: provided.al2
   architecture: arm64
-  region: ${opt:region, 'eu-west-1'}
+  region: ${opt:region, 'us-east-1'}
   stage: ${opt:stage, 'dev'}
   memorySize: 256
   timeout: 30
