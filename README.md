@@ -10,13 +10,14 @@ A Slack bot for Adyen payment troubleshooting with MCP integration, role-based a
 - Audit logging to dedicated Slack channel
 - Event-driven architecture (Lambda + SQS)
 - Thread-aware responses (always replies in threads)
+- Secrets managed via Doppler
 
 ## Architecture
 
 ```
 Slack → API Gateway → Webhook Lambda → SQS → Processor Lambda → Adyen MCP
                                                       ↓
-                                              LLM (OpenAI)
+                                                    LLM
 ```
 
 ## Prerequisites
@@ -25,28 +26,57 @@ Slack → API Gateway → Webhook Lambda → SQS → Processor Lambda → Adyen 
 - Node.js 20+ (for Adyen MCP)
 - AWS CLI configured
 - Serverless Framework 3.x
+- Doppler CLI
 
 ## Setup
 
-### 1. Create Slack App
+### 1. Setup Doppler
+
+```bash
+# Install Doppler CLI (macOS)
+brew install dopplerhq/cli/doppler
+
+# Login to Doppler
+doppler login
+
+# Setup project (creates doppler.yml)
+doppler setup
+```
+
+### 2. Configure Doppler Secrets
+
+Add these secrets in your Doppler project (`adyen-slack-assistant`):
+
+| Secret | Description |
+|--------|-------------|
+| `SLACK_BOT_TOKEN` | Slack bot OAuth token (xoxb-...) |
+| `SLACK_SIGNING_SECRET` | Slack app signing secret |
+| `ADYEN_API_KEY` | Adyen API key |
+| `ADYEN_ENVIRONMENT` | `TEST` or `LIVE` |
+| `ADYEN_LIVE_PREFIX` | Live URL prefix (only for LIVE) |
+| `OPENAI_API_KEY` | OpenAI API key |
+| `OPENAI_MODEL` | Model name (default: gpt-4o) |
+| `PERMISSIONS_JSON` | JSON permissions config (see below) |
+
+### 3. Create Slack App
 
 1. Go to https://api.slack.com/apps → Create New App
 2. Enable Event Subscriptions
 3. Subscribe to bot events: `app_mention`, `message.im`, `reaction_added`
 4. Add OAuth Scopes: `app_mentions:read`, `chat:write`, `channels:history`, `groups:history`, `im:history`, `reactions:read`, `usergroups:read`
 5. Install to workspace
-6. Copy Bot Token and Signing Secret
+6. Copy Bot Token and Signing Secret → Add to Doppler
 
-### 2. Get Adyen API Key
+### 4. Get Adyen API Key
 
 1. Go to Adyen Customer Area → Developers → API credentials
 2. Create a new webservice user
 3. Assign roles: Checkout Webservice, Merchant PAL Webservice, Management API roles
-4. Generate API key
+4. Generate API key → Add to Doppler
 
-### 3. Configure Permissions
+### 5. Configure Permissions
 
-Set the `PERMISSIONS_JSON` environment variable:
+Add `PERMISSIONS_JSON` to Doppler:
 
 ```json
 {
@@ -67,21 +97,17 @@ Set the `PERMISSIONS_JSON` environment variable:
 }
 ```
 
-### 4. Deploy
+### 6. Deploy
 
 ```bash
-# Set environment variables
-export SLACK_BOT_TOKEN="xoxb-..."
-export SLACK_SIGNING_SECRET="..."
-export ADYEN_API_KEY="..."
-export OPENAI_API_KEY="sk-..."
-export PERMISSIONS_JSON='{"channels":["C..."],...}'
+# Deploy to dev
+make deploy
 
-# Deploy
-make deploy STAGE=dev
+# Deploy to production
+make deploy-prod
 ```
 
-### 5. Configure Slack Event URL
+### 7. Configure Slack Event URL
 
 After deployment, copy the webhook URL from the output and set it as the Request URL in your Slack app's Event Subscriptions.
 
@@ -113,25 +139,22 @@ make deps
 # Build
 make build
 
+# Run locally with Doppler
+make run-local
+
 # Run tests
 make test
 
-# View logs
-make logs-processor STAGE=dev
+# View Doppler secrets
+make doppler-secrets
 ```
 
-## Environment Variables
+## Doppler Environments
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `SLACK_BOT_TOKEN` | Yes | Slack bot OAuth token |
-| `SLACK_SIGNING_SECRET` | Yes | Slack signing secret |
-| `ADYEN_API_KEY` | Yes | Adyen API key |
-| `ADYEN_ENVIRONMENT` | No | `TEST` or `LIVE` (default: TEST) |
-| `ADYEN_LIVE_PREFIX` | No | Required for LIVE environment |
-| `OPENAI_API_KEY` | Yes | OpenAI API key |
-| `OPENAI_MODEL` | No | Model to use (default: gpt-4o) |
-| `PERMISSIONS_JSON` | No | JSON permissions config |
+| Config | Usage |
+|--------|-------|
+| `dev` | Development/staging |
+| `prod` | Production |
 
 ## License
 

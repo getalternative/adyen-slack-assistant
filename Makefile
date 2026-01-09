@@ -1,5 +1,8 @@
 .PHONY: build clean deploy test
 
+# Default stage
+STAGE ?= dev
+
 # Build all Lambda functions
 build:
 	@echo "Building webhook..."
@@ -14,13 +17,13 @@ build:
 clean:
 	rm -rf bin/
 
-# Deploy to AWS
+# Deploy to AWS (uses Doppler for secrets)
 deploy: build
-	serverless deploy --stage $(STAGE)
+	doppler run --config $(STAGE) -- serverless deploy --stage $(STAGE)
 
 # Deploy to production
 deploy-prod: build
-	serverless deploy --stage prod
+	doppler run --config prod -- serverless deploy --stage prod
 
 # Run tests
 test:
@@ -39,9 +42,9 @@ fmt:
 lint:
 	golangci-lint run
 
-# Local development (requires docker)
-local:
-	serverless offline
+# Local development with Doppler
+run-local:
+	doppler run --config dev -- go run ./cmd/processor
 
 # Show logs
 logs-webhook:
@@ -50,5 +53,10 @@ logs-webhook:
 logs-processor:
 	serverless logs -f processor --stage $(STAGE) -t
 
-# Default stage
-STAGE ?= dev
+# Setup Doppler (run once)
+doppler-setup:
+	doppler setup
+
+# Show Doppler secrets (for debugging)
+doppler-secrets:
+	doppler secrets --config $(STAGE)
