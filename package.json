@@ -1,0 +1,23 @@
+{
+  "name": "adyen-slack-assistant",
+  "version": "1.0.0",
+  "description": "Slack bot for Adyen payment troubleshooting using MCP.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/getalternative/adyen-slack-assistant.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/getalternative/adyen-slack-assistant/issues"
+  },
+  "homepage": "https://github.com/getalternative/adyen-slack-assistant#readme",
+  "devDependencies": {
+    "serverless": "^4.30.0"
+  }
+}

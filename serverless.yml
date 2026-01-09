@@ -1,6 +1,6 @@
 service: adyen-slack-assistant
 
-frameworkVersion: '3'
+frameworkVersion: '4'
 
 provider:
   name: aws
@@ -10,6 +10,8 @@ provider:
   stage: ${opt:stage, 'dev'}
   memorySize: 256
   timeout: 30
+  apiGateway:
+    name: slack-prod-apis
 
   environment:
     SLACK_BOT_TOKEN: ${env:SLACK_BOT_TOKEN}

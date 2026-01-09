@@ -19,11 +19,11 @@ clean:
 
 # Deploy to AWS (uses Doppler for secrets)
 deploy: build
-	doppler run --config $(STAGE) -- serverless deploy --stage $(STAGE)
+	doppler run --config $(STAGE) -- npx serverless deploy --stage $(STAGE)
 
 # Deploy to production
 deploy-prod: build
-	doppler run --config prod -- serverless deploy --stage prod
+	doppler run --config prod -- npx serverless deploy --stage prod
 
 # Run tests
 test:
@@ -48,10 +48,10 @@ run-local:
 
 # Show logs
 logs-webhook:
-	serverless logs -f webhook --stage $(STAGE) -t
+	npx serverless logs -f webhook --stage $(STAGE) -t
 
 logs-processor:
-	serverless logs -f processor --stage $(STAGE) -t
+	npx serverless logs -f processor --stage $(STAGE) -t
 
 # Setup Doppler (run once)
 doppler-setup:
