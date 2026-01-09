@@ -1,7 +1,7 @@
 .PHONY: build clean deploy test
 
-# Default stage
-STAGE ?= dev
+# Default stage (matches Doppler config names: stg, prod)
+STAGE ?= stg
 
 # Build all Lambda functions
 build:
@@ -44,7 +44,7 @@ lint:
 
 # Local development with Doppler
 run-local:
-	doppler run --config dev -- go run ./cmd/processor
+	doppler run --config $(STAGE) -- go run ./cmd/processor
 
 # Show logs
 logs-webhook:
