@@ -10,7 +10,6 @@ import (
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/getalternative/adyen-slack-assistant/internal/adyen"
-	"github.com/getalternative/adyen-slack-assistant/internal/approval"
 	"github.com/getalternative/adyen-slack-assistant/internal/audit"
 	"github.com/getalternative/adyen-slack-assistant/internal/config"
 	"github.com/getalternative/adyen-slack-assistant/internal/llm"
@@ -24,7 +23,6 @@ var (
 	llmClient   *llm.Client
 	adyenClient *adyen.Client
 	permChecker *permissions.Checker
-	approvalMgr *approval.Manager
 	auditLogger *audit.Logger
 )
 
@@ -37,42 +35,25 @@ type QueueMessage struct {
 
 // MessageEvent represents a Slack message event
 type MessageEvent struct {
-	Type      string `json:"type"`
-	Channel   string `json:"channel"`
-	User      string `json:"user"`
-	Text      string `json:"text"`
-	Ts        string `json:"ts"`
-	ThreadTs  string `json:"thread_ts"`
-}
-
-// ReactionEvent represents a Slack reaction event
-type ReactionEvent struct {
 	Type     string `json:"type"`
+	Channel  string `json:"channel"`
 	User     string `json:"user"`
-	Reaction string `json:"reaction"`
-	Item     struct {
-		Type    string `json:"type"`
-		Channel string `json:"channel"`
-		Ts      string `json:"ts"`
-	} `json:"item"`
+	Text     string `json:"text"`
+	Ts       string `json:"ts"`
+	ThreadTs string `json:"thread_ts"`
 }
 
 func init() {
 	cfg = config.Load()
 	slack = slackClient.New(cfg)
 	llmClient = llm.New(cfg)
-	permChecker = permissions.New(cfg, slack)
+	permChecker = permissions.New(cfg)
 	auditLogger = audit.New(cfg, slack)
 
 	var err error
 	adyenClient, err = adyen.New(cfg)
 	if err != nil {
 		panic(fmt.Sprintf("failed to create Adyen client: %v", err))
-	}
-
-	approvalMgr, err = approval.New(cfg, slack)
-	if err != nil {
-		panic(fmt.Sprintf("failed to create approval manager: %v", err))
 	}
 }
 
@@ -90,14 +71,9 @@ func handler(ctx context.Context, sqsEvent events.SQSEvent) error {
 			continue
 		}
 
-		switch queueMsg.Type {
-		case "app_mention", "message":
+		if queueMsg.Type == "app_mention" || queueMsg.Type == "message" {
 			if err := handleMessage(ctx, queueMsg); err != nil {
 				fmt.Printf("Failed to handle message: %v\n", err)
-			}
-		case "reaction_added":
-			if err := handleReaction(ctx, queueMsg); err != nil {
-				fmt.Printf("Failed to handle reaction: %v\n", err)
 			}
 		}
 	}
@@ -146,113 +122,37 @@ func handleMessage(ctx context.Context, queueMsg QueueMessage) error {
 	for _, toolCall := range response.ToolCalls {
 		args := toolCall.Input
 
-		// Extract amount if present (for permission checks)
-		amount := extractAmount(args)
-
-		// Check permissions
-		permResult := permChecker.Check(event.User, event.Channel, toolCall.Name, amount)
-
+		// Check permissions (admins can write, others read-only)
+		permResult := permChecker.Check(event.User, event.Channel, toolCall.Name)
 		if !permResult.Allowed {
 			auditLogger.LogDenied(event.User, toolCall.Name, event.Channel, permResult.Reason)
-			return slack.Reply(msg, fmt.Sprintf("Permission denied: %s", permResult.Reason))
-		}
-
-		if permResult.NeedsApproval {
-			// Request approval
-			err := approvalMgr.RequestApproval(ctx, msg, toolCall.Name, args, amount, permResult.Approvers)
-			if err != nil {
-				return slack.Reply(msg, fmt.Sprintf("Failed to request approval: %s", err.Error()))
-			}
-			return nil // Wait for approval via reaction
+			return slack.Reply(msg, permResult.Reason)
 		}
 
 		// Execute the tool
 		result, err := adyenClient.CallTool(ctx, toolCall.Name, args)
 		if err != nil {
 			auditLogger.LogError(event.User, toolCall.Name, event.Channel, err.Error())
-			return slack.Reply(msg, fmt.Sprintf("Tool execution failed: %s", err.Error()))
+			return slack.Reply(msg, fmt.Sprintf("Error: %s", err.Error()))
 		}
 
-		// Log success and reply
-		auditLogger.LogAllowed(event.User, toolCall.Name, event.Channel, "Executed successfully")
-
-		// Format the result nicely
-		replyText := formatToolResult(toolCall.Name, result)
-		return slack.Reply(msg, replyText)
+		// Log and reply
+		auditLogger.LogAllowed(event.User, toolCall.Name, event.Channel, "OK")
+		return slack.Reply(msg, formatResult(toolCall.Name, result))
 	}
 
 	return nil
 }
 
-func handleReaction(ctx context.Context, queueMsg QueueMessage) error {
-	var event ReactionEvent
-	if err := json.Unmarshal(queueMsg.Event, &event); err != nil {
-		return fmt.Errorf("failed to parse reaction event: %w", err)
-	}
-
-	// Process the reaction through approval manager
-	req, decision, err := approvalMgr.HandleReaction(ctx, event.Reaction, event.User, event.Item.Channel, event.Item.Ts)
-	if err != nil {
-		return err
-	}
-
-	if req == nil {
-		return nil // Not a pending approval
-	}
-
-	msg := &slackClient.Message{
-		Channel:  req.Channel,
-		ThreadTs: req.ThreadTs,
-	}
-
-	if decision == "rejected" {
-		auditLogger.LogRejected(req.RequestedBy, req.Action, req.Channel, event.User)
-		return slack.Reply(msg, fmt.Sprintf("Request rejected by <@%s>", event.User))
-	}
-
-	// Approved - execute the action
-	auditLogger.LogApproved(req.RequestedBy, req.Action, req.Channel, event.User, "Approval granted")
-
-	slack.Reply(msg, fmt.Sprintf("Approved by <@%s>. Processing...", event.User))
-
-	// Execute the tool
-	result, err := adyenClient.CallTool(ctx, req.Action, req.Params)
-	if err != nil {
-		auditLogger.LogError(req.RequestedBy, req.Action, req.Channel, err.Error())
-		return slack.Reply(msg, fmt.Sprintf("Execution failed: %s", err.Error()))
-	}
-
-	replyText := formatToolResult(req.Action, result)
-	return slack.Reply(msg, replyText)
-}
-
-func extractAmount(args map[string]interface{}) int {
-	// Try common amount field patterns
-	if amount, ok := args["amount"].(map[string]interface{}); ok {
-		if value, ok := amount["value"].(float64); ok {
-			return int(value)
-		}
-	}
-	if amount, ok := args["amount"].(float64); ok {
-		return int(amount)
-	}
-	return 0
-}
-
-func formatToolResult(toolName string, result string) string {
-	// Add some formatting based on tool type
-	prefix := ":white_check_mark: "
-
+func formatResult(toolName string, result string) string {
+	prefix := ""
 	if strings.Contains(toolName, "refund") {
-		prefix = ":money_with_wings: *Refund processed*\n"
+		prefix = "*Refund processed*\n"
 	} else if strings.Contains(toolName, "cancel") {
-		prefix = ":no_entry_sign: *Payment cancelled*\n"
+		prefix = "*Payment cancelled*\n"
 	} else if strings.Contains(toolName, "create") {
-		prefix = ":link: *Created successfully*\n"
-	} else if strings.Contains(toolName, "get") || strings.Contains(toolName, "list") {
-		prefix = ":mag: "
+		prefix = "*Created*\n"
 	}
-
 	return prefix + "```\n" + result + "\n```"
 }
 
@@ -260,6 +160,6 @@ func main() {
 	if os.Getenv("AWS_LAMBDA_FUNCTION_NAME") != "" {
 		lambda.Start(handler)
 	} else {
-		fmt.Println("Running locally - use serverless offline or deploy to AWS")
+		fmt.Println("Run with: doppler run -- go run ./cmd/processor")
 	}
 }

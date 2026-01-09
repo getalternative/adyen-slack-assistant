@@ -19,9 +19,7 @@ provider:
     ADYEN_LIVE_PREFIX: ${env:ADYEN_LIVE_PREFIX, ''}
     ANTHROPIC_API_KEY: ${env:ANTHROPIC_API_KEY}
     ANTHROPIC_MODEL: ${env:ANTHROPIC_MODEL, 'claude-sonnet-4-20250514'}
-    DYNAMODB_TABLE: ${self:service}-approvals-${self:provider.stage}
     SQS_QUEUE_URL: !Ref ProcessingQueue
-    AWS_REGION: ${self:provider.region}
     PERMISSIONS_JSON: ${env:PERMISSIONS_JSON, ''}
 
   iam:
@@ -34,12 +32,6 @@ provider:
             - sqs:DeleteMessage
             - sqs:GetQueueAttributes
           Resource: !GetAtt ProcessingQueue.Arn
-        - Effect: Allow
-          Action:
-            - dynamodb:PutItem
-            - dynamodb:GetItem
-            - dynamodb:DeleteItem
-          Resource: !GetAtt ApprovalsTable.Arn
 
 package:
   individually: true
@@ -84,26 +76,7 @@ resources:
         QueueName: ${self:service}-dlq-${self:provider.stage}
         MessageRetentionPeriod: 1209600
 
-    ApprovalsTable:
-      Type: AWS::DynamoDB::Table
-      Properties:
-        TableName: ${self:service}-approvals-${self:provider.stage}
-        BillingMode: PAY_PER_REQUEST
-        AttributeDefinitions:
-          - AttributeName: pk
-            AttributeType: S
-        KeySchema:
-          - AttributeName: pk
-            KeyType: HASH
-        TimeToLiveSpecification:
-          AttributeName: expiresAt
-          Enabled: true
-
   Outputs:
     WebhookUrl:
       Description: Slack webhook URL
       Value: !Sub "https://${ApiGatewayRestApi}.execute-api.${AWS::Region}.amazonaws.com/${self:provider.stage}/slack/events"
-
-    QueueUrl:
-      Description: SQS Queue URL
-      Value: !Ref ProcessingQueue

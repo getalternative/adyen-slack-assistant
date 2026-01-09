@@ -31,31 +31,14 @@ type LLMConfig struct {
 }
 
 type PermissionsConfig struct {
-	Channels     []string          `json:"channels"`
-	Roles        RolesConfig       `json:"roles"`
-	Actions      map[string]Action `json:"actions"`
-	AuditChannel string            `json:"auditChannel"`
-}
-
-type RolesConfig struct {
-	Admin RoleDefinition `json:"admin"`
-}
-
-type RoleDefinition struct {
-	Users  []string `json:"users"`
-	Groups []string `json:"groups"`
-}
-
-type Action struct {
-	Level     string `json:"level"`     // any, admin
-	Approve   bool   `json:"approve"`   // requires approval
-	MaxAmount int    `json:"maxAmount"` // threshold in cents (0 = always approve)
+	Channels     []string `json:"channels"`
+	Admins       []string `json:"admins"` // User IDs who can read+write
+	AuditChannel string   `json:"auditChannel"`
 }
 
 type AWSConfig struct {
-	Region        string `json:"region"`
-	DynamoDBTable string `json:"dynamoDBTable"`
-	SQSQueueURL   string `json:"sqsQueueURL"`
+	Region      string `json:"region"`
+	SQSQueueURL string `json:"sqsQueueURL"`
 }
 
 var (
@@ -81,9 +64,8 @@ func Load() *Config {
 			},
 			Permissions: loadPermissions(),
 			AWS: AWSConfig{
-				Region:        getEnv("AWS_REGION", "eu-west-1"),
-				DynamoDBTable: getEnv("DYNAMODB_TABLE", "adyen-slack-approvals"),
-				SQSQueueURL:   getEnv("SQS_QUEUE_URL", ""),
+				Region:      getEnv("AWS_REGION", "eu-west-1"),
+				SQSQueueURL: getEnv("SQS_QUEUE_URL", ""),
 			},
 		}
 	})
@@ -93,20 +75,9 @@ func Load() *Config {
 func loadPermissions() PermissionsConfig {
 	// Default permissions - override with PERMISSIONS_JSON env var or file
 	defaultPerms := PermissionsConfig{
-		Channels: []string{}, // PLACEHOLDER: Add your channel IDs
-		Roles: RolesConfig{
-			Admin: RoleDefinition{
-				Users:  []string{}, // PLACEHOLDER: Add admin user IDs
-				Groups: []string{}, // PLACEHOLDER: Add admin group IDs
-			},
-		},
-		Actions: map[string]Action{
-			"refund": {Level: "admin", Approve: true, MaxAmount: 10000},  // €100
-			"cancel": {Level: "admin", Approve: true, MaxAmount: 0},
-			"create": {Level: "admin", Approve: false, MaxAmount: 0},
-			"read":   {Level: "any", Approve: false, MaxAmount: 0},
-		},
-		AuditChannel: "", // PLACEHOLDER: Add audit channel ID
+		Channels:     []string{},
+		Admins:       []string{},
+		AuditChannel: "",
 	}
 
 	// Try to load from environment variable
